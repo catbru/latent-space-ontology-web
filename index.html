@@ -1039,16 +1039,43 @@ function drawTerrainOcclude(proj, W, H, labelThresh) {
   // Merge quads + nodes into a single depth-sorted list
   const items = new Array(quads.length + philosophers.length);
   let k = 0;
-  for (const q of quads)          items[k++] = { t: 0, depth: q.depth, q };
+  for (const q of quads)        items[k++] = { t: 0, depth: q.depth, q };
   for (let i = 0; i < philosophers.length; i++)
     items[k++] = { t: 1, depth: proj[i].depth, i, sx: proj[i].sx, sy: proj[i].sy };
   items.sort((a, b) => a.depth - b.depth);
 
+  ctx.textBaseline = 'middle';
+  const drawn = [];
+
   for (const it of items) {
-    if (it.t === 0) renderQuad(it.q, verts);
-    else            drawOneNode(it.i, it.sx, it.sy, W, H);
+    if (it.t === 0) { renderQuad(it.q, verts); continue; }
+
+    const { i, sx, sy } = it;
+    drawOneNode(i, sx, sy, W, H);
+
+    // Label — drawn inline so terrain quads occlude it too
+    const p = philosophers[i];
+    if ((i === selectedIdx || i === hoveredIdx || p.rank < labelThresh)
+        && sx > -80 && sx < W + 80 && sy > -20 && sy < H + 20) {
+      const isSel = i === selectedIdx, isHov = i === hoveredIdx;
+      const r = nodeR(p) * 0.82;
+      const fs = isSel ? 12 : p.rank < 8 ? 11 : 10;
+      const fw = isSel ? '700' : p.rank < 15 ? '600' : '400';
+      ctx.font = `${fw} ${fs}px "Helvetica Neue",Arial,sans-serif`;
+      const lx = sx + r + 4, ly = sy;
+      const tw = ctx.measureText(p.label).width;
+      if (!isSel && !isHov) {
+        const box = { x: lx - 1, y: ly - fs / 2 - 1, w: tw + 2, h: fs + 2 };
+        if (drawn.some(b => box.x < b.x + b.w && box.x + box.w > b.x &&
+                            box.y < b.y + b.h && box.y + b.h > b.y)) continue;
+        drawn.push(box);
+      }
+      ctx.shadowColor = '#0d0f18'; ctx.shadowBlur = 5;
+      ctx.fillStyle = isSel ? '#fff' : (isHov ? '#eef0ff' : 'rgba(210,215,242,0.9)');
+      ctx.fillText(p.label, lx, ly);
+      ctx.shadowBlur = 0;
+    }
   }
-  drawLabels(proj, W, H, labelThresh);
 }
 
 function draw() {
