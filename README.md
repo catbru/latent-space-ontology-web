@@ -1,6 +1,8 @@
 # Latent Space Ontology — Philosophy Map
 
-<video src="demo.webm" controls width="100%"></video>
+
+[demo.webm](https://github.com/user-attachments/assets/7e5c50e9-8e10-44df-94e2-f6299e1aa4ba)
+
 
 An interactive visualization mapping 1,000 philosophers through semantic space. Each point is a thinker; its position reflects the intellectual distance between ideas — computed from 3,072-dimensional embedding vectors.
 
