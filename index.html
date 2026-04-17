@@ -366,6 +366,12 @@ canvas { display: block; }
           </div>
         </div>
         <div class="set-row">
+          <div class="set-toggle" id="toggle-occlude">
+            <div class="toggle-track on" id="track-occlude"><div class="toggle-thumb"></div></div>
+            <span class="toggle-label">Occlude nodes</span>
+          </div>
+        </div>
+        <div class="set-row">
           <span class="set-label">Resolution</span>
           <input type="range" id="tgrid-slider" min="50" max="200" step="25" value="100">
           <span class="set-val" id="tgrid-val">100</span>
@@ -661,6 +667,12 @@ document.getElementById('toggle-3d').addEventListener('click', () => {
   dirty = true;
 });
 
+document.getElementById('toggle-occlude').addEventListener('click', () => {
+  terrainOcclude = !terrainOcclude;
+  document.getElementById('track-occlude').classList.toggle('on', terrainOcclude);
+  dirty = true;
+});
+
 document.getElementById('tgrid-slider').addEventListener('input', function() {
   TGRID = +this.value;
   document.getElementById('tgrid-val').textContent = TGRID;
@@ -819,6 +831,7 @@ function getZoom()   { return scale / baseScale; }
 // ═══════════════════════════════════════════════
 // TERRAIN — KDE Density Mesh
 // ═══════════════════════════════════════════════
+let terrainOcclude = true; // depth-sort terrain quads and nodes together
 let TGRID  = 100;     // cells per side (vertices: 101×101)
 let TSIGMA = 0.04;    // KDE bandwidth in UMAP coord space [0,1]
 let THSCL  = 0.40;    // vertical exaggeration
@@ -915,29 +928,25 @@ function projPhil(px, py) {
 // ═══════════════════════════════════════════════
 // DRAW
 // ═══════════════════════════════════════════════
-function drawNodes(proj, W, H, labelThresh) {
-  const order = Array.from({ length: philosophers.length }, (_, i) => i);
-  if (is3D) order.sort((a, b) => proj[a].depth - proj[b].depth);
-
-  for (const i of order) {
-    const p = philosophers[i];
-    const { sx, sy } = proj[i];
-    if (sx < -15 || sx > W + 15 || sy < -15 || sy > H + 15) continue;
-    const r = nodeR(p) * (is3D ? 0.82 : 1);
-    const isSel = i === selectedIdx, isHov = i === hoveredIdx;
-    if (isSel) {
-      ctx.beginPath(); ctx.arc(sx, sy, r + 7, 0, Math.PI * 2);
-      ctx.fillStyle = p.color + '28'; ctx.fill();
-      ctx.beginPath(); ctx.arc(sx, sy, r + 3, 0, Math.PI * 2);
-      ctx.fillStyle = p.color + '50'; ctx.fill();
-    }
-    ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2);
-    ctx.fillStyle = isSel ? '#fff' : (isHov ? lighten(p.color, 65) : p.color);
-    ctx.globalAlpha = isSel || isHov ? 1 : nodeOpacity;
-    ctx.fill();
-    ctx.globalAlpha = 1;
+function drawOneNode(i, sx, sy, W, H) {
+  if (sx < -15 || sx > W + 15 || sy < -15 || sy > H + 15) return;
+  const p = philosophers[i];
+  const r = nodeR(p) * (is3D ? 0.82 : 1);
+  const isSel = i === selectedIdx, isHov = i === hoveredIdx;
+  if (isSel) {
+    ctx.beginPath(); ctx.arc(sx, sy, r + 7, 0, Math.PI * 2);
+    ctx.fillStyle = p.color + '28'; ctx.fill();
+    ctx.beginPath(); ctx.arc(sx, sy, r + 3, 0, Math.PI * 2);
+    ctx.fillStyle = p.color + '50'; ctx.fill();
   }
+  ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2);
+  ctx.fillStyle = isSel ? '#fff' : (isHov ? lighten(p.color, 65) : p.color);
+  ctx.globalAlpha = isSel || isHov ? 1 : nodeOpacity;
+  ctx.fill();
+  ctx.globalAlpha = 1;
+}
 
+function drawLabels(proj, W, H, labelThresh) {
   ctx.textBaseline = 'middle';
   const drawn = [], toLabel = [];
   for (let i = 0; i < philosophers.length; i++) {
@@ -972,17 +981,22 @@ function drawNodes(proj, W, H, labelThresh) {
   }
 }
 
-function drawTerrain() {
-  if (!terrainGrid) return;
-  const G = TGRID, G1 = G + 1;
+function drawNodes(proj, W, H, labelThresh) {
+  const order = Array.from({ length: philosophers.length }, (_, i) => i);
+  if (is3D) order.sort((a, b) => proj[a].depth - proj[b].depth);
+  for (const i of order) {
+    const { sx, sy } = proj[i];
+    drawOneNode(i, sx, sy, W, H);
+  }
+  drawLabels(proj, W, H, labelThresh);
+}
 
-  // Pre-project all (G+1)² vertices
+function buildTerrainGeometry() {
+  const G = TGRID, G1 = G + 1;
   const verts = new Array(G1 * G1);
   for (let gx = 0; gx <= G; gx++)
     for (let gy = 0; gy <= G; gy++)
       verts[gx * G1 + gy] = projVertex(gx, gy);
-
-  // Build quads
   const quads = new Array(G * G);
   let qi = 0;
   for (let gx = 0; gx < G; gx++) {
@@ -993,22 +1007,48 @@ function drawTerrain() {
       quads[qi++] = { i00, i10, i01, i11, depth, h };
     }
   }
-  quads.sort((a, b) => a.depth - b.depth);
+  return { verts, quads };
+}
 
-  for (const q of quads) {
-    const v00 = verts[q.i00], v10 = verts[q.i10], v11 = verts[q.i11], v01 = verts[q.i01];
-    ctx.beginPath();
-    ctx.moveTo(v00.sx, v00.sy); ctx.lineTo(v10.sx, v10.sy);
-    ctx.lineTo(v11.sx, v11.sy); ctx.lineTo(v01.sx, v01.sy);
-    ctx.closePath();
-    ctx.fillStyle = terrainColor(q.h);
-    ctx.fill();
-    if (q.h > 0.22) {
-      ctx.strokeStyle = 'rgba(255,255,255,0.055)';
-      ctx.lineWidth = 0.35;
-      ctx.stroke();
-    }
+function renderQuad(q, verts) {
+  const v00 = verts[q.i00], v10 = verts[q.i10], v11 = verts[q.i11], v01 = verts[q.i01];
+  ctx.beginPath();
+  ctx.moveTo(v00.sx, v00.sy); ctx.lineTo(v10.sx, v10.sy);
+  ctx.lineTo(v11.sx, v11.sy); ctx.lineTo(v01.sx, v01.sy);
+  ctx.closePath();
+  ctx.fillStyle = terrainColor(q.h);
+  ctx.fill();
+  if (q.h > 0.22) {
+    ctx.strokeStyle = 'rgba(255,255,255,0.055)';
+    ctx.lineWidth = 0.35;
+    ctx.stroke();
   }
+}
+
+function drawTerrain() {
+  if (!terrainGrid) return;
+  const { verts, quads } = buildTerrainGeometry();
+  quads.sort((a, b) => a.depth - b.depth);
+  for (const q of quads) renderQuad(q, verts);
+}
+
+function drawTerrainOcclude(proj, W, H, labelThresh) {
+  if (!terrainGrid) return;
+  const { verts, quads } = buildTerrainGeometry();
+
+  // Merge quads + nodes into a single depth-sorted list
+  const items = new Array(quads.length + philosophers.length);
+  let k = 0;
+  for (const q of quads)          items[k++] = { t: 0, depth: q.depth, q };
+  for (let i = 0; i < philosophers.length; i++)
+    items[k++] = { t: 1, depth: proj[i].depth, i, sx: proj[i].sx, sy: proj[i].sy };
+  items.sort((a, b) => a.depth - b.depth);
+
+  for (const it of items) {
+    if (it.t === 0) renderQuad(it.q, verts);
+    else            drawOneNode(it.i, it.sx, it.sy, W, H);
+  }
+  drawLabels(proj, W, H, labelThresh);
 }
 
 function draw() {
@@ -1022,9 +1062,15 @@ function draw() {
 
   if (is3D) {
     // ── TERRAIN MODE ──
-    drawTerrain();
     proj = philosophers.map((_, i) => { const c = coords2d[i]; return projPhil(c[0], c[1]); });
     labelThresh = labelMode === 'auto' ? 30 : labelMode === 'all' ? Infinity : labelMode;
+    if (terrainOcclude) {
+      screenPos = proj;
+      drawTerrainOcclude(proj, W, H, labelThresh);
+      dirty = false;
+      return;
+    }
+    drawTerrain();
   } else {
     // ── 2D MODE ──
     proj = philosophers.map((_, i) => {
