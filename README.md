@@ -3,6 +3,9 @@
 
 [demo.webm](https://github.com/user-attachments/assets/7e5c50e9-8e10-44df-94e2-f6299e1aa4ba)
 
+[![Explore the Map](https://img.shields.io/badge/Explore-Interactive_Map-blue?style=for-the-badge&logo=github)](https://catbru.github.io/latent-space-ontology-web/)
+
+> **[Explore the Interactive Map ↗](https://catbru.github.io/latent-space-ontology-web/)**
 
 An interactive visualization mapping 1,000 philosophers through semantic space. Each point is a thinker; its position reflects the intellectual distance between ideas — computed from 3,072-dimensional embedding vectors.
 
